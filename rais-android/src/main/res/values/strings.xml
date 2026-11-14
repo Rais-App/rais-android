@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="rais_close">Close</string>
+    <string name="rais_load_failed_title">Can\'t load the payment page</string>
+    <string name="rais_load_failed_body">Check your connection and try again.</string>
+    <string name="rais_retry">Try again</string>
+    <string name="rais_declined">The payment was declined.</string>
+    <string name="rais_expired">The payment expired.</string>
+    <string name="rais_invalid_url">This is not a valid Raïs checkout address.</string>
+    <string name="rais_webview_unsupported">This device\'s WebView is too old to show the payment page safely. Update \"Android System WebView\".</string>
+    <string name="rais_share">Share</string>
+</resources>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- "Open in the Raïs app" is offered only when the Raïs app can open rais:// links (Android 11+ asks apps to say which they look for). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="rais" />
+        </intent>
+    </queries>
+
+    <application>
+        <!-- The checkout screen. Not exported: only the SDK can start it. It handles its own configuration changes (rotation, dark mode)
+             so a payment in progress (the fields being typed, the page in the WebView) is never rebuilt in the middle. -->
+        <activity
+            android:name="app.rais.checkout.internal.CheckoutActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Rais.Checkout"
+            android:windowSoftInputMode="adjustResize|stateHidden"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|uiMode|layoutDirection|locale|fontScale|density" />
+
+        <!-- Shares the PDF receipt (View receipt > share) from the SDK's cache folder only. Its own class, so it never collides with an
+             app's androidx FileProvider. -->
+        <provider
+            android:name="app.rais.checkout.internal.sheet.RaisReceiptProvider"
+            android:authorities="${applicationId}.rais.receipts"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/rais_receipt_paths" />
+        </provider>
+    </application>
+</manifest>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="rais_close">Fermer</string>
+    <string name="rais_load_failed_title">Impossible de charger la page de paiement</string>
+    <string name="rais_load_failed_body">Vérifiez votre connexion et réessayez.</string>
+    <string name="rais_retry">Réessayer</string>
+    <string name="rais_declined">Le paiement a été refusé.</string>
+    <string name="rais_expired">Le paiement a expiré.</string>
+    <string name="rais_invalid_url">Ce n’est pas une adresse de paiement Raïs valide.</string>
+    <string name="rais_webview_unsupported">Le WebView de cet appareil est trop ancien pour afficher la page de paiement en toute sécurité. Mettez à jour « Android System WebView ».</string>
+    <string name="rais_share">Partager</string>
+</resources>

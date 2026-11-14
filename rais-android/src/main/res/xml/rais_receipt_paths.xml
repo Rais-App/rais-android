@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The only files the SDK ever shares: the PDF receipt it downloaded into its own cache folder, while the checkout is open. -->
+<paths>
+    <cache-path name="rais_receipts" path="rais-receipts/" />
+</paths>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="rais_close">إغلاق</string>
+    <string name="rais_load_failed_title">تعذّر تحميل صفحة الدفع</string>
+    <string name="rais_load_failed_body">تحقق من اتصالك بالإنترنت وحاول مجدداً.</string>
+    <string name="rais_retry">إعادة المحاولة</string>
+    <string name="rais_declined">تم رفض عملية الدفع.</string>
+    <string name="rais_expired">انتهت صلاحية عملية الدفع.</string>
+    <string name="rais_invalid_url">هذا ليس عنوان دفع صالحاً من رايس.</string>
+    <string name="rais_webview_unsupported">إصدار WebView على هذا الجهاز قديم جداً لعرض صفحة الدفع بأمان. قم بتحديث «Android System WebView».</string>
+    <string name="rais_share">مشاركة</string>
+</resources>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Converted from rais-ios/Sources/Rais/Resources/Marks.xcassets (mark.svg). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="26dp" android:height="26dp"
+    android:viewportWidth="40.0" android:viewportHeight="40.0">
+    <group android:translateX="-0.0" android:translateY="-0.0">
+        <path android:fillColor="#FFE63946" android:pathData="M10.0,0.0 H30.0 A10.0,10.0 0 0 1 40.0,10.0 V30.0 A10.0,10.0 0 0 1 30.0,40.0 H10.0 A10.0,10.0 0 0 1 0.0,30.0 V10.0 A10.0,10.0 0 0 1 10.0,0.0 Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M12 10h9c3.866 0 7 3.134 7 7s-3.134 7-7 7h-3l5 6h-4l-5-6V10z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M12 10h4v14h-4V10z" />
+    </group>
+</vector>

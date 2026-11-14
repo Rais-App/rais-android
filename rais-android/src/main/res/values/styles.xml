@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Platform theme only (no AppCompat, no Material): the checkout looks the same whatever theme the host app uses. The window is edge to
+         edge and colored by the screen itself. The activity picks the light or the dark one when it starts (CheckoutActivity.onCreate):
+         WebView answers a page's `prefers-color-scheme` from whether the theme is light, and a bank's page must agree with the checkout
+         around it. The manifest names the base one, which is only what shows until then. -->
+    <style name="Theme.Rais.Checkout" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="p">shortEdges</item>
+    </style>
+    <style name="Theme.Rais.Checkout.Light" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="p">shortEdges</item>
+    </style>
+</resources>
