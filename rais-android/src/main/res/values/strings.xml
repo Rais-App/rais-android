@@ -9,4 +9,8 @@
     <string name="rais_invalid_url">This is not a valid Raïs checkout address.</string>
     <string name="rais_webview_unsupported">This device\'s WebView is too old to show the payment page safely. Update \"Android System WebView\".</string>
     <string name="rais_share">Share</string>
+    <!-- The address the Raïs website hands a "Sign in with Raïs" answer to (raiscb- and 8 to 40 lower-case letters or digits: the only
+         shape the checkout accepts). It is declared in the manifest and read by the SDK; an app that wants a scheme of its own (two apps
+         that both carry the SDK would otherwise share this one) overrides this string. -->
+    <string name="rais_callback_scheme" translatable="false">raiscb-androidsdk</string>
 </resources>

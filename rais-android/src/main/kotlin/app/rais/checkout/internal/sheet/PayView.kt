@@ -48,12 +48,19 @@ internal class PayView(
     sheet: Sheet,
     private val payment: Sheet.Payment,
     private val pay: Sheet.Pay,
-    canOpenApp: Boolean,
 ) : Stack(context, vertical = true, gap = sheetContext.theme.dp(12)) {
     sealed class Choice {
         object Balance : Choice()
         data class Card(val card: Sheet.Pay.Card) : Choice()
         object NewCard : Choice()
+
+        /** A name for a way to pay (a key for what hangs off it). */
+        val key: String
+            get() = when (this) {
+                Balance -> "balance"
+                is Card -> "card.${card.id}"
+                NewCard -> "new"
+            }
     }
 
     class Submission(val method: CheckoutApi.Method, val email: String?)
@@ -78,6 +85,15 @@ internal class PayView(
     private var emailCell: InputCell? = null
     private var emailGroup: InputGroup? = null
     private var saveRow: ToggleRow? = null
+    private var appRow: RaisPayRow? = null
+    /** The hairline above each way to pay (hidden with the saved ones), and the way to bring the saved ones back after "another card" folded them away. */
+    private val separators = mutableMapOf<String, View>()
+    private var newCardRow: ChoiceRow? = null
+    private var newCardGlyph: Glyph? = null
+    private var choicesHeading: Label? = null
+    /** Whether the saved ways to pay (balance, saved cards) are folded away: see [foldedAfter]. */
+    var savedFolded = false
+        private set
 
     var choice: Choice = Choice.NewCard
         private set
@@ -97,14 +113,9 @@ internal class PayView(
 
     init {
         buildSummary(sheet)
+        buildRaisRow()
         buildChoices()
         buildCardForm()
-        val appUrl = pay.appUrl
-        if (appUrl != null && canOpenApp) {
-            val open = SheetButton(context, theme, SheetButton.Kind.Secondary, words["wallet.open_app"], R.drawable.rais_ic_open_app)
-            open.onTap { onOpenApp?.invoke(appUrl) }
-            add(open)
-        }
         buildAgreements()
         select(initialChoice(), animated = false)
     }
@@ -204,13 +215,39 @@ internal class PayView(
 
     // ── The ways to pay ──
 
+    /** "Pay with Raïs", first, for a payer nobody identified: the Raïs app confirms it with the payer's balance or a saved card. */
+    private fun buildRaisRow() {
+        val appUrl = pay.appUrl
+        if (pay.payer != null || appUrl == null) return
+        val brand = words["wallet.cta"]
+        val note = words["sheet.app_note"]
+        // A server that does not word this yet (it is older than the SDK) leaves the card form as it always was
+        if (brand.isEmpty() || note.isEmpty()) return
+        val row = RaisPayRow(context, theme, brand, note)
+        row.setOnClickListener {
+            it.haptic(HAPTIC_SELECTION)
+            row.isOpening = true
+            onOpenApp?.invoke(appUrl)
+        }
+        appRow = row
+        val firstGap = if (payment.lines.isEmpty() && payment.details.isEmpty()) theme.dp(28) else theme.dp(4)
+        add(row, before = firstGap)
+        // (iOS: 20 under the row: the stack's 12 and 8 more on the next heading)
+    }
+
+    /** The app did not open (it is not installed), or the payer is back: the row is ready for another tap. */
+    fun appOpenEnded() {
+        appRow?.isOpening = false
+    }
+
     private fun buildChoices() {
         val choices = mutableListOf<Choice>()
         if (pay.balance != null) choices.add(Choice.Balance)
         pay.cards.mapTo(choices) { Choice.Card(it) }
-        val firstGap = if (payment.lines.isEmpty() && payment.details.isEmpty()) theme.dp(28) else theme.dp(4)
+        // (under the "Pay with Raïs" row the headings sit 8 dp lower than the stack's own gap)
+        val firstGap = if (appRow != null) theme.dp(20) else if (payment.lines.isEmpty() && payment.details.isEmpty()) theme.dp(28) else theme.dp(4)
         if (choices.isEmpty()) {
-            add(heading(words["pay.title"]), before = firstGap)
+            add(heading(words[if (appRow == null) "pay.title" else "wallet.or_card"]), before = firstGap)
             return
         }
         choices.add(Choice.NewCard)
@@ -224,7 +261,9 @@ internal class PayView(
             row.add(leave, before = theme.dp(12))
             add(row, before = firstGap)
         } else {
-            add(heading(words["saved.title"]), before = firstGap)
+            val title = heading(words["saved.title"])
+            choicesHeading = title
+            add(title, before = firstGap)
         }
 
         val box = GroupBox(context, theme)
@@ -242,18 +281,24 @@ internal class PayView(
                 }
                 is Choice.Card -> ChoiceRow(
                     context, theme, "•••• ${choice.card.last4}", "${words["pay.expiry"]} ${choice.card.expiry}", latinTitle = true,
-                    mark = BrandMarks.single(context, theme, choice.card.brand, 30) ?: cardGlyph(R.drawable.rais_ic_card),
+                    mark = BrandMarks.single(context, theme, choice.card.brand, 30) ?: cardGlyph(R.drawable.rais_ic_card).first,
                 ).apply { tag = "rais.choice.card" }
-                Choice.NewCard -> ChoiceRow(
-                    context, theme, words[if (pay.payer != null) "wallet.other_card" else "saved.other"], null, mark = cardGlyph(R.drawable.rais_ic_add),
-                ).apply { tag = "rais.choice.new" }
+                Choice.NewCard -> {
+                    val glyph = cardGlyph(R.drawable.rais_ic_add)
+                    newCardGlyph = glyph.second
+                    ChoiceRow(context, theme, newCardTitle, null, mark = glyph.first).apply {
+                        tag = "rais.choice.new"
+                        newCardRow = this
+                    }
+                }
             }
             row.setOnClickListener {
                 it.haptic(HAPTIC_SELECTION)
-                select(choice, animated = true)
+                // while the saved ways to pay are folded away this row reads "Use a saved card": it brings them back
+                select(tappedChoice(choice, savedFolded, firstSavedChoice()), animated = true)
             }
             choiceRows.add(choice to row)
-            box.add(row)
+            box.add(row)?.let { separators[choice.key] = it }
         }
         add(box, before = if (pay.payer != null) theme.dp(4) else theme.dp(12))
 
@@ -275,16 +320,18 @@ internal class PayView(
         add(savedCvcGroup)
     }
 
-    private fun cardGlyph(@DrawableRes icon: Int): View {
+    /** The little tile of a way to pay without a network mark, and the glyph in it (to be swapped). */
+    private fun cardGlyph(@DrawableRes icon: Int): Pair<View, Glyph> {
+        val inner = Glyph(context, icon) { theme.secondary }
         val frame = object : FrameLayout(context), Themed {
             override fun applyTheme() {
                 background = theme.rounded(theme.background, theme.dp(7f))
             }
         }
         frame.applyTheme()
-        frame.addView(Glyph(context, icon) { theme.secondary }, FrameLayout.LayoutParams(theme.dp(17), theme.dp(17), Gravity.CENTER))
+        frame.addView(inner, FrameLayout.LayoutParams(theme.dp(17), theme.dp(17), Gravity.CENTER))
         frame.layoutParams = FrameLayout.LayoutParams(theme.dp(30), theme.dp(30), Gravity.CENTER)
-        return frame
+        return frame to inner
     }
 
     private fun heading(text: String): Label = Label(context, theme, 15f, 600).apply {
@@ -292,20 +339,39 @@ internal class PayView(
         accessibilityHeading()
     }
 
-    private fun initialChoice(): Choice {
-        pay.chosen?.let { chosen -> pay.cards.firstOrNull { it.id == chosen }?.let { return Choice.Card(it) } }
-        if (pay.balance?.enough == true) return Choice.Balance
-        pay.cards.firstOrNull()?.let { return Choice.Card(it) }
-        return Choice.NewCard
+    private val newCardTitle: String get() = words[if (pay.payer != null) "wallet.other_card" else "saved.other"]
+
+    private fun initialChoice(): Choice = initialChoiceOf(pay)
+
+    private fun firstSavedChoice(): Choice = firstSavedOf(pay)
+
+    /** Folds the saved ways to pay away (only "another card" stays, selected) or shows them all again. */
+    private fun setSavedFolded(folded: Boolean) {
+        savedFolded = folded
+        for ((candidate, row) in choiceRows) {
+            val keep = !folded || candidate == Choice.NewCard
+            row.visibility = if (keep) VISIBLE else GONE
+            // the first row showing has nothing above it
+            separators[candidate.key]?.visibility = if (folded) GONE else VISIBLE
+        }
+        // the "another card" row turns into the way back to the saved ones
+        newCardRow?.setTitle(if (folded) words[if (pay.balance?.enough == true) "sheet.pick_saved_or_balance" else "sheet.pick_saved"] else newCardTitle)
+        newCardRow?.isDisclosure = folded
+        newCardGlyph?.set(if (folded) R.drawable.rais_ic_card else R.drawable.rais_ic_add)
+        choicesHeading?.text = words[if (folded) "pay.title" else "saved.title"]
     }
 
     private fun select(new: Choice, animated: Boolean) {
         choice = new
         for ((candidate, row) in choiceRows) row.choiceSelected = candidate == new
+        if (animated) animateChanges()   // (one transition for everything this choice changes, the fold included)
+        if (animated && choiceRows.isNotEmpty()) {
+            val folded = foldedAfter(new, savedFolded, canFoldSaved(pay))
+            if (folded != savedFolded) setSavedFolded(folded)
+        }
         val needsCvc = (new as? Choice.Card)?.card?.needsCvc ?: false
         if (new is Choice.Card) savedCvcCell.edit.contentDescription = words.fill("wallet.card_cvc", "last4" to new.card.last4)
         val typing = new == Choice.NewCard
-        if (animated) animateChanges()
         savedCvcGroup.visibility = if (needsCvc) VISIBLE else GONE
         newCardSection.visibility = if (typing) VISIBLE else GONE
         saveRow?.visibility = if (typing) VISIBLE else GONE
@@ -510,8 +576,40 @@ internal class PayView(
     private fun setDescendantsEnabled(view: View, enabled: Boolean) {
         if (view is EditText) view.isEnabled = enabled
         if (view is ChoiceRow) view.isClickable = enabled
+        if (view is RaisPayRow) view.isEnabled = enabled
         if (view is ViewGroup) for (index in 0 until view.childCount) setDescendantsEnabled(view.getChildAt(index), enabled)
     }
+}
+
+/** The ways to pay and what choosing one does to them, as plain functions (the views only draw what these say). */
+internal fun initialChoiceOf(pay: Sheet.Pay): PayView.Choice {
+    pay.chosen?.let { chosen -> pay.cards.firstOrNull { it.id == chosen }?.let { return PayView.Choice.Card(it) } }
+    if (pay.balance?.enough == true) return PayView.Choice.Balance
+    pay.cards.firstOrNull()?.let { return PayView.Choice.Card(it) }
+    return PayView.Choice.NewCard
+}
+
+/** Saved ways to pay can be folded away only when one of them could be paid with. */
+internal fun canFoldSaved(pay: Sheet.Pay): Boolean = pay.cards.isNotEmpty() || pay.balance?.enough == true
+
+/** The saved way to pay that the "Use a saved card" row picks: the one the screen would start with, else the first saved card. */
+internal fun firstSavedOf(pay: Sheet.Pay): PayView.Choice {
+    val first = initialChoiceOf(pay)
+    return if (first == PayView.Choice.NewCard) pay.cards.firstOrNull()?.let { PayView.Choice.Card(it) } ?: PayView.Choice.NewCard else first
+}
+
+/** What a tap on [tapped] selects: while the saved ways to pay are folded away, "another card" is the way back to them. */
+internal fun tappedChoice(tapped: PayView.Choice, folded: Boolean, firstSaved: PayView.Choice): PayView.Choice =
+    if (tapped == PayView.Choice.NewCard && folded) firstSaved else tapped
+
+/**
+ * Whether the saved ways to pay are folded after [selected] was chosen: choosing "another card" folds them (so the whole card form fits on
+ * screen) when there is something to fold, and choosing a saved one brings them back.
+ */
+internal fun foldedAfter(selected: PayView.Choice, folded: Boolean, canFold: Boolean): Boolean = when {
+    selected == PayView.Choice.NewCard && !folded && canFold -> true
+    selected != PayView.Choice.NewCard && folded -> false
+    else -> folded
 }
 
 /** Marks a label as a heading for TalkBack. */

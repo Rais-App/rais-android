@@ -27,7 +27,7 @@ dependencies {
 }
 ```
 
-The SDK adds to your manifest by itself: the `INTERNET` permission, one activity (not exported), a file provider of its own (to share the PDF receipt), and a `<queries>` entry for `rais://` links (so "Open in the Raïs app" is offered only when that app is installed).
+The SDK adds to your manifest by itself: the `INTERNET` permission, the checkout's activity (not exported), a small exported activity that receives the answer of "Pay with Raïs" when the payer signs in on the website (see [Paying with Raïs](#paying-with-raïs); it does nothing unless a sign-in of your running app is waiting for it), and a file provider of its own (to share the PDF receipt). There is no `<queries>` entry and nothing for you to configure.
 
 ## Show the checkout
 
@@ -128,14 +128,36 @@ Colors are `Color` ints (`0xAARRGGBB`). Give `colorsLight` and `colorsDark` sepa
 
 - **The payment**: the store (its logo, filling its tile), the amount, the description, and "View details" for the order's lines, the reference and the validity. A test payment carries a "Test mode" badge.
 - **The ways to pay**: a card typed now (number, expiry, CVC, name: formatted as typed, the network's mark following the number, checked before anything is sent), the cards a store keeps for its customer, and, for a payer the checkout has identified, their Raïs balance and the cards of their Raïs account. The optional receipt address and "save this card" are there when the payment calls for them.
+- **Pay with Raïs**, first on the screen when the store can be paid from a Raïs wallet (see below), then the other ways to pay. Choosing **Use another card** folds the saved ways to pay (balance, saved cards) away so the whole card form fits on screen; that row then reads **Use a saved card** and brings them back, and picking one of them hides the card form again.
 - **The bank's code** (3-D Secure), in six boxes, with the keyboard's own code suggestion and paste.
 - **The result**: paid, refused (with the bank's reason), expired, cancelled, or still being confirmed with the bank (the screen keeps asking). A paid payment offers its PDF receipt (viewed in the checkout, shared or printed from there) and the receipt by e-mail.
 
 The words, the amounts and every rule come from Raïs' server (`GET /pay/{id}/sheet`), in the payer's language, so the screen always says what the hosted page says. Arabic reads right to left even if your app does not declare `android:supportsRtl` (the checkout's own views are laid out right to left; your screens are untouched). A payment whose card must be typed on the bank's own page (`mode: "raw"`) is shown as that page, in the same screen, and so is any payment on a server that has no native checkout: the SDK falls back by itself, keeping the payer's session.
 
+### Paying with Raïs
+
+When the store can be paid from a Raïs wallet, the screen leads with a **Pay with Raïs** button, above the card form. There is nothing to configure and nothing to add to your manifest:
+
+- If the payer has the **Raïs app** (`app.rais.wallet`), it opens on this payment (`rais://pay/<payment id>`, an explicit intent for that package: no `<queries>` entry, no package lookup). They confirm with their fingerprint or face, from their balance or a card of their Raïs account, and the app offers **Back to <your app>**: it opens the payment's `success_url`. The checkout screen reads the payment again as soon as it is in front of the payer, so it shows "Payment Successful" by itself. Give the payment a `success_url` that opens your app (a URL scheme or an App Link you handle) to get that button.
+- If they **do not have the app**, the same button signs them in with Raïs on the Raïs website, in a Custom Tab (it shares the browser's sign-ins), and the payer then pays from their balance or a saved card in this very screen. The website hands the answer back to the SDK on the scheme `raiscb-androidsdk` (declared by the SDK's own manifest entry; the app never sees a password). If two of your apps carry the SDK on the same device, give one of them its own scheme by overriding the string `rais_callback_scheme` in its resources (`raiscb-` followed by 8 to 40 lower-case letters or digits, the only shape the checkout accepts). Closing the tab without signing in simply returns to the screen.
+- A payment can be paid from a Raïs wallet only when it is a live payment of an ordinary store (a test payment never offers it), and only while the wallet payments switch is on.
+
+Your server must still confirm a payment with the API or the signed webhook; the screen, the result and the redirects are for the payer.
+
 ## Security
 
 - The checkout address must be `https://…rais.app` (or a host you list in `additionalTrustedHosts`). Plain `http` is accepted for loopback (`localhost`, `127.0.0.1`, and `10.0.2.2`, the emulator's name for your computer) and, when you list it, for a private-network address (10.x, 172.16–31.x, 192.168.x, 100.64–127.x, `*.local`, `*.ts.net`), so you can test against a development server; your debug build must allow cleartext traffic to it. Public hosts always need https.
+- **Cleartext for a development host is your app's decision, not the SDK's.** Android blocks plain `http` for every app from API 28 unless the app allows it, and the SDK does not change that for your app. For a debug build, allow it for the one host only (`res/xml/network_security_config.xml` in `src/debug`, named by `android:networkSecurityConfig` on `<application>` in the debug manifest), and list the same host in `additionalTrustedHosts`:
+
+  ```xml
+  <network-security-config>
+      <domain-config cleartextTrafficPermitted="true">
+          <domain includeSubdomains="false">192.168.1.20</domain>   <!-- your computer, or macbook.local, or a *.ts.net name -->
+      </domain-config>
+  </network-security-config>
+  ```
+
+  (`android:usesCleartextTraffic="true"` also works for a throwaway build, but allows every host.) Without it the checkout shows "Can't load the payment page" for that host. Never ship it in a release build.
 - Card details go from the fields straight to Raïs over TLS, in the one request that pays. They are never written to disk, never logged, and never handed to your app: the result carries the payment's id, reference and order number only.
 - The native checkout keeps its cookies (who is paying, the bank's step in progress) in memory, for that checkout only: not in your app's other connections and not in the WebView's store. When it hands a payment over to the web checkout, that payment's cookies go with it, and the web checkout clears them when it closes.
 - The server's robot check still applies: the SDK solves its proof of work in the background, so a payer has nothing to tick and a script gains nothing by pretending to be the SDK.
@@ -144,7 +166,7 @@ The words, the amounts and every rule come from Raïs' server (`GET /pay/{id}/sh
 
 ## The keyboard
 
-The checkout is edge to edge and owns the keyboard's insets. The page scrolls under everything; the pay button sits in a floating pane that rides on the keyboard (following its animation), and the page's bottom room follows the pane with 16 dp to spare. The field being typed in, with what is said under it, is brought fully into view above the pane when it takes the focus and again once the keyboard has settled: the last field on the page, the six boxes of the bank's code and the receipt e-mail form (field, note and Send button) included. This works the same on every Android version, including apps that target Android 15 (SDK 35), where `adjustResize` alone no longer resizes edge-to-edge windows. In the web checkout the WebView is placed above the keyboard the same way, so the page never jumps.
+The checkout is edge to edge and owns the keyboard's insets. The page scrolls under everything; the pay button sits in a floating pane that rides on the keyboard (following its animation), and the page's bottom room follows the pane with 16 dp to spare. The field being typed in, with what is said under it, is brought fully into view above the pane when it takes the focus and again once the keyboard has settled: the last field on the page, the six boxes of the bank's code and the receipt e-mail form (field, note and Send button) included. A tap on a button, a row or a switch while the keyboard is open fires on the **first** tap: the screen puts the keyboard away only for a finished tap on empty space (a click), never when a finger goes down, so the layout never moves under a tap. This works the same on every Android version, including apps that target Android 15 (SDK 35), where `adjustResize` alone no longer resizes edge-to-edge windows. In the web checkout the WebView is placed above the keyboard the same way, so the page never jumps.
 
 ## For framework integrations
 

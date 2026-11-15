@@ -102,8 +102,40 @@ internal class CheckoutApi(private val checkoutUrl: String, location: Location, 
         if (languageCode != null) URI(location.origin).host?.let { jar.set(it, "rais-locale", languageCode) }
     }
 
+    /**
+     * Set once [invalidate] ran. The screen can outlive its checkout (the payer coming back from the Raïs app, a poller, a callback that was
+     * already on its way), so every call checks this first: a call after the end is refused, never sent. (On iOS an invalidated session
+     * raises an exception that killed the app; here it would be a request nobody is waiting for.)
+     */
+    @Volatile var isClosed = false
+        private set
+
+    /** The checkout has ended and only its last call (dropping the bank's step) may still go out: everything else is refused from now on. */
+    @Volatile private var isEnding = false
+
+    fun beginClosing() {
+        isEnding = true
+    }
+
     fun invalidate() {
+        isClosed = true
         scope.cancel()
+    }
+
+    /**
+     * Where "Sign in with Raïs" starts for this payment: the checkout sends the payer to the Raïs website's sign-in and, once they are signed
+     * in, hands the answer to [callbackScheme] (`raiscb-` and 8 to 40 lower-case letters or digits).
+     */
+    fun signInUrl(callbackScheme: String): String = location.pageUrl + "/raisid/start?native=" + encode(callbackScheme)
+
+    /**
+     * Keeps the payer session the sign-in handed over as the page's own cookie (this payment only, as the page sets it): from now on the
+     * checkout knows who is paying and offers their balance and their cards.
+     */
+    fun adoptPayerSession(value: String) {
+        if (isClosed) return
+        val host = URI(location.origin).host ?: return
+        jar.set(host, PAYER_COOKIE, value, path = "/pay/${location.paymentId}", secure = location.origin.startsWith("https://"), maxAgeSeconds = 900)
     }
 
     // ── Reading the checkout ──
@@ -192,7 +224,7 @@ internal class CheckoutApi(private val checkoutUrl: String, location: Location, 
 
     /** Abandons the bank's step that waits for its code, so the payer can start over. Moves no money. */
     suspend fun cancelCode() {
-        runCatching { call("otp/cancel") }
+        runCatching { call("otp/cancel", closing = true) }
     }
 
     /** "Not you?": forget who was paying. */
@@ -312,19 +344,19 @@ internal class CheckoutApi(private val checkoutUrl: String, location: Location, 
      * A POST of the payment's own endpoints. With [needsPass] the robot check is passed first, and passed again (once) when the server says
      * the pass ran out.
      */
-    private suspend fun call(path: String, body: JSONObject? = null, needsPass: Boolean = false): Answer {
+    private suspend fun call(path: String, body: JSONObject? = null, needsPass: Boolean = false, closing: Boolean = false): Answer {
         if (needsPass && this.needsPass) ensurePass()
-        var answer = post(path, body)
+        var answer = post(path, body, closing)
         if (needsPass && answer.json.optString("code") == "captcha_required") {
             this.needsPass = true
             passUntil = 0
-            if (ensurePass()) answer = post(path, body)
+            if (ensurePass()) answer = post(path, body, closing)
         }
         return answer
     }
 
-    private suspend fun post(path: String, body: JSONObject?): Answer {
-        val response = send("${location.pageUrl}/$path", method = "POST", body = (body ?: JSONObject()).toString().toByteArray())
+    private suspend fun post(path: String, body: JSONObject?, closing: Boolean = false): Answer {
+        val response = send("${location.pageUrl}/$path", method = "POST", body = (body ?: JSONObject()).toString().toByteArray(), closing = closing)
         val json = try {
             JSONObject(response.text())
         } catch (_: Exception) {
@@ -354,7 +386,9 @@ internal class CheckoutApi(private val checkoutUrl: String, location: Location, 
         limit: Int = 2_000_000,
         timeoutMs: Int = 75_000,   // a card call waits for the bank
         cookies: Boolean = true,
+        closing: Boolean = false,
     ): Response = withContext(Dispatchers.IO) {
+        if (isClosed || (isEnding && !closing)) throw ApiFailure.Connection()
         var current = address
         var hops = 0
         while (true) {
@@ -429,6 +463,7 @@ internal class CheckoutApi(private val checkoutUrl: String, location: Location, 
     }
 
     companion object {
+        const val PAYER_COOKIE = "rais_payer"
         val USER_AGENT = "RaisSDK/${RaisCheckout.VERSION} (Android; native)"
 
         private fun encode(value: String) = URLEncoder.encode(value, "UTF-8")

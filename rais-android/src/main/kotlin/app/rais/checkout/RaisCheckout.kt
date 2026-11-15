@@ -85,6 +85,9 @@ public class RaisCheckout(caller: ActivityResultCaller, private val callback: Re
         /**
          * Hosts, besides `rais.app` and its subdomains, that may be loaded as the checkout (a staging environment, for example).
          * Loopback addresses (`localhost`, `127.0.0.1`, and `10.0.2.2` for the Android emulator) are always allowed for local testing.
+         * A host on a private network (192.168.x.x, 10.x, 172.16-31.x, 100.64-127.x, `*.local`, `*.ts.net`) may be loaded over plain http, but
+         * only when you list it here. Android itself blocks cleartext traffic for your app from API 28: allow that one host in a debug
+         * `network_security_config` (see the README); the SDK never allows cleartext for your app.
          */
         val additionalTrustedHosts: List<String> = emptyList(),
         /**

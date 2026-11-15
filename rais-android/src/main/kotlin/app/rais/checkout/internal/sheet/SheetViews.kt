@@ -625,6 +625,20 @@ internal class ChoiceRow(
             applyTheme()
         }
 
+    /** The row opens something (a chevron) instead of being a choice (a check mark). */
+    var isDisclosure = false
+        set(value) {
+            field = value
+            applyTheme()
+        }
+
+    private var detailText: String? = detail
+
+    fun setTitle(text: String) {
+        titleView.text = text
+        contentDescription = listOfNotNull(text, detailText).joinToString(", ")
+    }
+
     /** (The platform's constructor may set the enabled and pressed states before this view's own parts exist.) */
     private var built = false
 
@@ -658,9 +672,14 @@ internal class ChoiceRow(
     }
 
     override fun applyTheme() {
-        check.setImageResource(if (choiceSelected) R.drawable.rais_ic_check_circle else R.drawable.rais_ic_circle)
-        ImageViewCompat.setImageTintList(check, ColorStateList.valueOf(if (choiceSelected) theme.primary else theme.tertiary))
-        isSelected = choiceSelected
+        if (isDisclosure) {
+            check.setImageResource(R.drawable.rais_ic_expand_more)
+            ImageViewCompat.setImageTintList(check, ColorStateList.valueOf(theme.secondary))
+        } else {
+            check.setImageResource(if (choiceSelected) R.drawable.rais_ic_check_circle else R.drawable.rais_ic_circle)
+            ImageViewCompat.setImageTintList(check, ColorStateList.valueOf(if (choiceSelected) theme.primary else theme.tertiary))
+        }
+        isSelected = choiceSelected && !isDisclosure
         alpha = if (isEnabled) 1f else 0.45f
         setBackgroundColor(if (isPressed || isFocused) theme.line else 0)
         titleView.applyTheme()
@@ -683,6 +702,74 @@ internal class ChoiceRow(
     }
 }
 
+/**
+ * "Pay with Raïs": the way to pay in the Raïs app (or, without it, after signing in with Raïs on the website), with the person's balance or
+ * a saved card. One tap, a bordered card with the Raïs mark, so it reads as a way to pay of its own and not as a link.
+ */
+@SuppressLint("ViewConstructor")
+internal class RaisPayRow(context: Context, private val theme: SheetTheme, title: String, note: String) : LinearLayout(context), Themed {
+    private val arrow = Glyph(context, R.drawable.rais_ic_chevron_right) { theme.tertiary }
+    private val spinner = ProgressBar(context, null, android.R.attr.progressBarStyleSmall)
+    private val titleView = Label(context, theme, 16f, 600)
+    private val noteView = Label(context, theme, 13f) { theme.secondary }
+
+    /** The payer left for the app: a spinner takes the arrow's place until they are back or it did not open. */
+    var isOpening = false
+        set(value) {
+            if (field == value) return
+            field = value
+            arrow.visibility = if (value) INVISIBLE else VISIBLE
+            spinner.visibility = if (value) VISIBLE else GONE
+            isClickable = !value
+        }
+
+    init {
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = theme.dp(68)
+        setPadding(theme.dp(14), theme.dp(14), theme.dp(14), theme.dp(14))
+        isClickable = true
+        isFocusable = true
+        if (Build.VERSION.SDK_INT >= 26) defaultFocusHighlightEnabled = false
+        contentDescription = "$title. $note"
+        tag = "rais.wallet"
+
+        val mark = Glyph(context, R.drawable.rais_mark_rais, null)
+        mark.clipToOutline = true
+        mark.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) = outline.setRoundRect(0, 0, view.width, view.height, theme.dp(9f))
+        }
+        addView(mark, LayoutParams(theme.dp(40), theme.dp(40)))
+
+        titleView.text = title
+        titleView.maxLines = 2
+        noteView.text = note
+        val words = LinearLayout(context).apply { orientation = VERTICAL }
+        words.addView(titleView, LayoutParams(MATCH, WRAP))
+        words.addView(noteView, LayoutParams(MATCH, WRAP).apply { topMargin = theme.dp(2) })
+        for (view in listOf(titleView, noteView)) view.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        addView(words, LayoutParams(0, WRAP, 1f).apply { marginStart = theme.dp(12); marginEnd = theme.dp(12) })
+
+        val trailing = FrameLayout(context)
+        trailing.addView(arrow, FrameLayout.LayoutParams(theme.dp(20), theme.dp(20), Gravity.CENTER))
+        spinner.visibility = GONE
+        spinner.indeterminateTintList = ColorStateList.valueOf(theme.secondary)
+        trailing.addView(spinner, FrameLayout.LayoutParams(theme.dp(20), theme.dp(20), Gravity.CENTER))
+        addView(trailing, LayoutParams(theme.dp(24), theme.dp(24)))
+        applyTheme()
+    }
+
+    override fun setPressed(pressed: Boolean) {
+        super.setPressed(pressed)
+        if (isAttachedToWindow || background != null) applyTheme()
+    }
+
+    override fun applyTheme() {
+        background = theme.rounded(if (isPressed) theme.line else theme.surface, theme.cardRadius, theme.border, theme.dp(1f))
+        spinner.indeterminateTintList = ColorStateList.valueOf(theme.secondary)
+    }
+}
+
 /** Rows in one rounded box with a hairline between them: the ways to pay, the lines of an order. */
 @SuppressLint("ViewConstructor")
 internal class GroupBox(context: Context, private val theme: SheetTheme) : LinearLayout(context), Themed {
@@ -697,14 +784,18 @@ internal class GroupBox(context: Context, private val theme: SheetTheme) : Linea
         applyTheme()
     }
 
-    fun add(row: View) {
+    /** Adds a row below the others, with a hairline above it; the hairline is returned so a row can be hidden together with it. */
+    fun add(row: View): View? {
+        var separator: View? = null
         if (childCount > 0) {
             val line = View(context)
             lines.add(line)
             line.setBackgroundColor(theme.line)
             addView(line, LayoutParams(MATCH, max(1, theme.dp(1))))
+            separator = line
         }
         addView(row, LayoutParams(MATCH, WRAP))
+        return separator
     }
 
     override fun applyTheme() {

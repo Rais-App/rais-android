@@ -115,6 +115,9 @@ internal class NativeCheckout(
     private var lastPrepare = 0L
     private var poller: Job? = null
     private var leftForApp = false
+    private var webSignIn: WebSignIn? = null
+    /** Gives the "Pay with Raïs" row its arrow back once the payer is back from the Raïs app. */
+    private var appOpenEnded: (() -> Unit)? = null
     private var receiptFile: File? = null
     private var secondaryWanted = false
     /** The field (with what is said under it) that has the keyboard: brought into view again once the keyboard has settled. */
@@ -156,7 +159,9 @@ internal class NativeCheckout(
         scroll.onScrolled = { y -> topFade.alpha = min(1f, max(0f, y / theme.dp(24f))) }
         scroll.addView(column, FrameLayout.LayoutParams(MATCH, WRAP))
         column.addView(stage, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.CENTER_HORIZONTAL))
-        // a tap beside the fields puts the keyboard away
+        // A tap beside the fields puts the keyboard away. It is a click (a finished tap), never a touch going down: a control (button, row,
+        // switch) takes its own click first, and nothing moves under a finger before it is lifted, so a tap on a button with the keyboard
+        // open fires on the first tap (KeyboardTapTest pins that no touch handler exists in the sheet).
         column.setOnClickListener { hideKeyboard() }
         root.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
         topFade.alpha = 0f
@@ -365,6 +370,7 @@ internal class NativeCheckout(
 
     /** Reads the checkout with [read] and shows what it says. A lost connection shows "Can't load" with a way to ask again, the same question. */
     private fun load(reading: Reading = Reading.Visibly, read: suspend () -> Sheet) {
+        if (finished) return   // nothing is read for a checkout that has ended
         poller?.cancel()
         if (reading == Reading.Visibly) show(Phase.Loading)
         scope.launch {
@@ -387,10 +393,12 @@ internal class NativeCheckout(
 
     private fun reload(reading: Reading = Reading.Visibly) {
         val api = api ?: return
+        if (finished) return
         load(reading) { api.sheet() }
     }
 
     private fun render(sheet: Sheet) {
+        if (finished) return
         this.sheet = sheet
         val context = SheetContext(theme, Words(sheet.text), sheet.rtl, sheet.sandbox)
         this.context = context
@@ -412,8 +420,7 @@ internal class NativeCheckout(
                 }
                 lastOutcome = null
                 api.warmUp()
-                val canOpenApp = pay.appUrl?.let(::canOpen) ?: false
-                val page = PayView(ui, context, sheet, payment, pay, canOpenApp)
+                val page = PayView(ui, context, sheet, payment, pay)
                 page.onChoice = { primary.title = page.buttonTitle }
                 page.onCardEditing = { prepareSession() }
                 page.onFocus = { view ->
@@ -423,10 +430,7 @@ internal class NativeCheckout(
                 configuration.merchantLogo?.let { page.showLogo(it) }
                 page.onSignOut = { signOut() }
                 page.onOpen = { open(it) }
-                page.onOpenApp = { url ->
-                    leftForApp = true
-                    open(url)
-                }
+                page.onOpenApp = { url -> openRaisApp(url) { page.appOpenEnded() } }
                 payView = page
                 primary.title = page.buttonTitle
                 primary.icon = R.drawable.rais_ic_lock
@@ -717,9 +721,30 @@ internal class NativeCheckout(
         scope.launch { runCatching { ensureSession() } }   // said again when the payer pays
     }
 
+    /** "Pay with Raïs" without the Raïs app: sign in on the Raïs website, then pay from the balance or a saved card here, natively. */
+    private fun signInWithRais() {
+        val api = api ?: return
+        if (finished || webSignIn != null) return
+        val scheme = WebSignIn.callbackScheme(activity)
+        val flow = WebSignIn(scheme) { outcome ->
+            if (finished) return@WebSignIn
+            webSignIn = null
+            when (outcome) {
+                is WebSignIn.Outcome.SignedIn -> {
+                    api.adoptPayerSession(outcome.session)
+                    load(Reading.Silently) { api.sheet() }
+                }
+                WebSignIn.Outcome.Cancelled -> Unit
+                WebSignIn.Outcome.Failed -> showNotice(context?.words?.get("wallet.sign_in_failed")?.takeIf { it.isNotEmpty() })
+            }
+        }
+        webSignIn = flow
+        flow.start(activity, api.signInUrl(scheme))
+    }
+
     private fun signOut() {
         val api = api ?: return
-        if (isBusy) return
+        if (isBusy || finished) return
         show(Phase.Loading)
         scope.launch {
             api.signOut()
@@ -767,6 +792,7 @@ internal class NativeCheckout(
 
     private fun cancelCode() {
         val api = api ?: return
+        if (finished) return
         setBusy(true)
         scope.launch {
             api.cancelCode()
@@ -802,7 +828,7 @@ internal class NativeCheckout(
         poller = scope.launch {
             repeat(45) {
                 delay(4_000)
-                if (!isActive) return@launch
+                if (!isActive || finished) return@launch
                 if (api.isSettled(confirming.statusUrl)) {
                     if (!isActive) return@launch
                     load(Reading.Silently) { api.sheetAt(confirming.resultUrl) }
@@ -853,6 +879,7 @@ internal class NativeCheckout(
 
     private fun emailReceipt(address: String?) {
         val api = api ?: return
+        if (finished) return
         val outcomeView = outcomeView ?: return
         val context = context ?: return
         scope.launch {
@@ -872,17 +899,61 @@ internal class NativeCheckout(
         }
     }
 
-    /** Back from the Raïs app, where the payer may have paid this very payment: read it again. */
-    fun onResume() {
-        if (!leftForApp || phase != Phase.Pay || isBusy) return
-        leftForApp = false
-        reload(Reading.Silently)
+    /**
+     * Hands the payment to the Raïs app (an explicit intent for its package: no `<queries>`, no package lookup; a missing app is an
+     * [ActivityNotFoundException]). When the app is not there the same button signs the payer in with Raïs on the website instead.
+     */
+    private fun openRaisApp(appUrl: String, done: () -> Unit) {
+        if (finished) return
+        val intent = RaisApp.intent(appUrl)
+        var opened = false
+        if (intent != null) {
+            leftForApp = true
+            opened = try {
+                activity.startActivity(intent)
+                true
+            } catch (_: ActivityNotFoundException) {
+                false
+            } catch (_: SecurityException) {
+                false
+            }
+        }
+        if (opened) {
+            appOpenEnded = done   // the row keeps its spinner until the payer is back
+        } else {
+            leftForApp = false
+            done()
+            signInWithRais()
+        }
     }
 
-    private fun canOpen(url: String): Boolean = try {
-        Intent(Intent.ACTION_VIEW, Uri.parse(url)).resolveActivity(activity.packageManager) != null
-    } catch (_: Exception) {
-        false
+    /**
+     * Back from the Raïs app, where the payer may have paid this very payment: read it again. This runs when the screen comes to the front,
+     * which can be after the checkout has ended, so it checks [finished] first and does nothing for an ended checkout.
+     */
+    fun onResume() {
+        if (finished) return
+        webSignIn?.activityResumed()
+        appOpenEnded?.invoke()
+        appOpenEnded = null
+        val api = api
+        if (!ReturnRules.shouldReadAgain(finished, leftForApp, phase == Phase.Pay, isBusy, api != null && !api.isClosed)) return
+        leftForApp = false
+        // `fresh`: if the payer did pay it there, this reads "Payment Successful", not "Invoice Already Paid" (it changes words only)
+        load(Reading.Silently) { api!!.sheet(fresh = true) }
+    }
+
+    /** The screen is being destroyed (finished or not): nothing may call back into it any more. */
+    fun onDestroy() {
+        webSignIn?.cancel()
+        webSignIn = null
+        appOpenEnded = null
+    }
+
+    /** The screen goes to the background: the Raïs app or the sign-in tab opened over it. */
+    fun onPause() {
+        if (finished) return
+        webSignIn?.activityPaused()
     }
 
     /** Links (the terms, a top-up, the Raïs app) open outside the checkout, so the payer can always come back. */
@@ -937,9 +1008,12 @@ internal class NativeCheckout(
         if (finished) return
         finished = true
         poller?.cancel()
+        webSignIn?.cancel()
+        webSignIn = null
         val result = forced ?: makeResult()
         api?.let { api ->
             val abandon = phase == Phase.Code
+            api.beginClosing()   // from here on nothing but dropping the bank's step may be sent
             // (not the screen's scope: it ends with the screen, and a code nobody will type must not hold the payment)
             CoroutineScope(Dispatchers.IO).launch {
                 if (abandon) api.cancelCode()

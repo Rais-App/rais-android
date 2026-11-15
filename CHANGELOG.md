@@ -2,6 +2,16 @@
 
 All notable changes to the Raïs Android SDK. The SDK follows [semantic versioning](https://semver.org). The checkout page itself is hosted by Raïs and improves without an SDK release; changes to what the page sends the app are announced here first.
 
+## Unreleased
+
+- **Pay with Raïs**, first on the screen when the store can be paid from a Raïs wallet: with the Raïs app (`app.rais.wallet`: it opens on the payment, the payer confirms and the app brings them back to your app through the payment's `success_url`), or, without the app, by signing in with Raïs on the Raïs website in a Custom Tab and then paying from the balance or a saved card in the SDK's own screen. No configuration. The SDK's manifest no longer carries a `<queries>` entry (the app is opened by an explicit intent); it adds one small exported activity that receives the website's answer on the scheme `raiscb-androidsdk` (override the string `rais_callback_scheme` to give an app a scheme of its own).
+- Choosing "Use another card" folds the saved ways to pay (balance, saved cards) away so the whole card form fits on screen; the "Use another card" row itself then reads "Use a saved card" and brings them back, and picking one of them hides the card form again.
+- Back from the Raïs app, a payment that was just made reads "Payment Successful" (not "Invoice Already Paid"): the screen reads the payment again, fresh, when it comes back to the front.
+- No call goes out after the checkout has ended: the network client refuses calls once the checkout is closed, and the screen's `onResume`, its poller and its callbacks do nothing for an ended checkout (iOS crashed on exactly this when the payer came back from the Raïs app).
+- Keyboard: a tap on a button with the keyboard open fires on the first tap. (The Android screen already acted on a finished tap only; this is now pinned by a test, with every touch handler audited.)
+- `additionalTrustedHosts` and plain http for a private-network host: unchanged, as on iOS (only when the app lists that host itself); the README now shows the `network_security_config` an app needs for it.
+- Server (additive, the same contract as the iOS SDK): `GET /m/v1/payments/{id}` carries `return_urls`, `POST /m/v1/payments/{id}/pay` carries `return_url`; `GET /pay/{id}/raisid/start?native=raiscb-…` hands the payer session to the app.
+
 ## 1.0.0 (2026-11-14)
 
 First release.

@@ -3,14 +3,6 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- "Open in the Raïs app" is offered only when the Raïs app can open rais:// links (Android 11+ asks apps to say which they look for). -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="rais" />
-        </intent>
-    </queries>
-
     <application>
         <!-- The checkout screen. Not exported: only the SDK can start it. It handles its own configuration changes (rotation, dark mode)
              so a payment in progress (the fields being typed, the page in the WebView) is never rebuilt in the middle. -->
@@ -20,6 +12,24 @@
             android:theme="@style/Theme.Rais.Checkout"
             android:windowSoftInputMode="adjustResize|stateHidden"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|uiMode|layoutDirection|locale|fontScale|density" />
+
+        <!-- "Pay with Raïs" without the Raïs app: the Raïs website hands the payer's sign-in back on <scheme>://signed-in?s=… (the scheme is
+             the string rais_callback_scheme). Exported because the browser starts it; it does nothing unless a sign-in of this very process
+             is waiting for it, and then it only brings the checkout back in front. No query for the Raïs app's package is needed: the app
+             is opened by an explicit intent, and a missing app is an ActivityNotFoundException, not a package lookup. -->
+        <activity
+            android:name="app.rais.checkout.internal.sheet.SignInReturnActivity"
+            android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="@string/rais_callback_scheme" android:host="signed-in" />
+            </intent-filter>
+        </activity>
 
         <!-- Shares the PDF receipt (View receipt > share) from the SDK's cache folder only. Its own class, so it never collides with an
              app's androidx FileProvider. -->

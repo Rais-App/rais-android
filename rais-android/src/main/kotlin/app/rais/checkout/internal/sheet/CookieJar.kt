@@ -59,10 +59,10 @@ internal class CookieJar(private val clock: () -> Long = System::currentTimeMill
 
     /** Sets a cookie directly (the language the app asked for, kept the way the site keeps it). */
     @Synchronized
-    fun set(host: String, name: String, value: String, path: String = "/") {
+    fun set(host: String, name: String, value: String, path: String = "/", secure: Boolean = false, maxAgeSeconds: Long? = null) {
         val lower = host.lowercase(Locale.ROOT)
         cookies.removeAll { it.name == name && it.host == lower && it.path == path }
-        cookies.add(Cookie(name, value, lower, false, path, false, null))
+        cookies.add(Cookie(name, value, lower, false, path, secure, maxAgeSeconds?.let { clock() + it * 1000 }))
     }
 
     /** The `Cookie` header for a request to [url], or `null` when no cookie applies. Longer paths first, as browsers send them. */

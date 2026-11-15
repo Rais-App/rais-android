@@ -103,7 +103,12 @@ internal class CheckoutActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        native?.onResume()
+        if (!finished) native?.onResume()
+    }
+
+    override fun onPause() {
+        if (!finished) native?.onPause()
+        super.onPause()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -115,6 +120,7 @@ internal class CheckoutActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        native?.onDestroy()
         web?.destroy()
         if (current?.get() === this) current = null
         if (isFinishing && ::args.isInitialized) CheckoutContract.Handoff.release(args.token)
@@ -138,6 +144,16 @@ internal class CheckoutActivity : ComponentActivity() {
     companion object {
         private const val STATE_WEB = "app.rais.checkout.web"
         private var current: WeakReference<CheckoutActivity>? = null
+
+        /**
+         * Brings the open checkout back in front of what was started over it (the browser tab of "Sign in with Raïs"). The checkout is
+         * found in memory: with none open (the process restarted meanwhile) nothing is started, so no empty screen can appear.
+         */
+        fun bringToFront(from: android.content.Context) {
+            val open = current?.get()?.takeIf { !it.isFinishing && !it.finished } ?: return
+            val intent = Intent(from, CheckoutActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            open.startActivity(intent)
+        }
 
         fun dismissCurrent() {
             current?.get()?.takeIf { !it.isFinishing }?.dismissFromApp()
